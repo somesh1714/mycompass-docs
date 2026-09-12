@@ -86,11 +86,12 @@
 <h2 id="scope">2. Scope — what's in, what's deferred</h2>
 <table>
   <tr><th>In scope now</th><th>Deferred (Set G, later)</th></tr>
-  <tr><td>Email + password registration/login <span class="badge now">DONE</span></td><td>Sign in with Google (OAuth ID token exchange) <span class="badge later">PLANNED</span></td></tr>
-  <tr><td>Email verification on registration <span class="badge now">DONE</span></td><td>Refresh tokens / silent renewal</td></tr>
-  <tr><td>Password reset ("forgot password") flow <span class="badge now">DONE</span></td><td>Roles/permissions system</td></tr>
-  <tr><td>Stateless JWT issued by our backend <span class="badge now">DONE</span></td><td>Account deletion</td></tr>
-  <tr><td>Password hashing (BCrypt) <span class="badge now">DONE</span></td><td>Rate limiting / brute-force protection</td></tr>
+  <tr><td>Email + password registration/login <span class="badge now">DONE</span></td><td>Refresh tokens / silent renewal</td></tr>
+  <tr><td>Email verification on registration <span class="badge now">DONE</span></td><td>Roles/permissions system</td></tr>
+  <tr><td>Password reset ("forgot password") flow <span class="badge now">DONE</span></td><td>Account deletion</td></tr>
+  <tr><td>Sign in with Google (OAuth ID token exchange) <span class="badge now">DONE</span></td><td>Rate limiting / brute-force protection</td></tr>
+  <tr><td>Stateless JWT issued by our backend <span class="badge now">DONE</span></td><td></td></tr>
+  <tr><td>Password hashing (BCrypt) <span class="badge now">DONE</span></td><td></td></tr>
   <tr><td>Protecting API routes with a JWT filter <span class="badge now">DONE</span></td><td></td></tr>
 </table>
 
@@ -154,7 +155,7 @@
   <tr><td><code>AuthController</code> + <code>AuthExceptionHandler</code></td><td>Exposes <code>/api/auth/*</code> endpoints; maps validation failures to clean 400/409 responses</td><td><span class="badge now">DONE</span></td></tr>
   <tr><td><code>JwtAuthenticationFilter</code></td><td>Runs on every request, reads the <code>Authorization</code> header, validates the JWT, populates Spring Security's context</td><td><span class="badge now">DONE</span></td></tr>
   <tr><td><code>SecurityConfig</code></td><td>Stateless session policy, CSRF disabled (stateless JWT API), permit <code>/api/auth/**</code> and Swagger paths, require auth everywhere else, register the JWT filter</td><td><span class="badge now">DONE</span></td></tr>
-  <tr><td><code>GoogleTokenVerifier</code></td><td>Verifies a Google ID token's signature, audience, and expiry against Google's JWKS; feeds <code>/api/auth/google</code></td><td><span class="badge later">PLANNED</span></td></tr>
+  <tr><td><code>GoogleTokenVerifier</code></td><td>Verifies a Google ID token's signature, audience, and expiry against Google's JWKS (via the official <code>google-api-client</code> library); feeds <code>/api/auth/google</code></td><td><span class="badge now">DONE</span></td></tr>
 </table>
 
 <h2 id="flows">6. Process flows</h2>
@@ -221,9 +222,9 @@ Load User by email
               Return { token, user }
 </div>
 
-<h3>Flow C — Sign in with Google <span class="badge later">PLANNED — not yet built</span></h3>
+<h3>Flow C — Sign in with Google <span class="badge now">IMPLEMENTED</span></h3>
 <div class="diagram">
-User clicks "Sign in with Google" (React button)
+User clicks "Sign in with Google" (React button — frontend not built yet)
         │
         ▼
 Google Identity Services popup — user authenticates directly with Google
@@ -238,29 +239,44 @@ Frontend: POST /api/auth/google { idToken }
         ▼
 Backend: GoogleTokenVerifier checks —
    • signature is genuinely from Google
-   • audience matches OUR client ID
+   • audience matches OUR client ID (app.google.client-id)
    • token has not expired
         │
    ┌────┴─────┐
-  invalid      valid → extract email, name, googleId
+  invalid      valid → extract googleId (sub), email, name
    │                │
    ▼                ▼
-401           Does a User with this email already exist?
+400           Does a User with this email already exist?
                     │
-             ┌──────┴───────┐
-            yes              no
-             │                │
-             ▼                ▼
-      link googleId      create new User
-      if not already      (provider = GOOGLE)
-      linked
-             │                │
-             └───────┬────────┘
-                      ▼
-             JwtService generates OUR app JWT
-                      │
-                      ▼
-             Return { token, user }
+             ┌──────┴───────────────┐
+            yes                     no
+             │                       │
+             ▼                       ▼
+      Link googleId if         Create new User
+      not already set —        (provider = GOOGLE,
+      PROVIDER STAYS AS-IS      emailVerified = true —
+      → a LOCAL account          Google already verified
+      keeps its password AND     this email address,
+      gains Google as an        so our own verification
+      alternate sign-in          flow is skipped entirely)
+      method (hybrid account)
+             │                       │
+             └───────────┬───────────┘
+                         ▼
+                JwtService generates OUR app JWT
+                         │
+                         ▼
+                Return { token, user }
+</div>
+<div class="note">
+  <strong>Two decisions worth noting, settled during implementation:</strong>
+  <ul>
+    <li><strong>Linking never overwrites an existing <code>googleId</code></strong> — if an account somehow already has one linked, a second Google sign-in with a different Google account's token does not silently replace it.</li>
+    <li><strong>A brand-new Google signup skips email verification entirely</strong> (<code>emailVerified = true</code> immediately) — since Google itself already confirmed the user controls that email address, re-verifying it ourselves would be redundant.</li>
+  </ul>
+</div>
+<div class="action">
+  <strong>Still required before this works end-to-end:</strong> a real Google OAuth Client ID from Google Cloud Console, set as <code>app.google.client-id</code> in <code>application.properties</code> (currently a placeholder). Without it, <code>GoogleTokenVerifier</code> will reject every token as having the wrong audience. This is an external setup step, not a code change.
 </div>
 
 <h3>Flow D — Any authenticated request afterwards <span class="badge now">IMPLEMENTED</span></h3>
@@ -422,14 +438,13 @@ Look up VerificationToken by (token, type = PASSWORD_RESET)
   <tr><td>GET</td><td><code>/api/auth/verify-email?token=</code></td><td>No</td><td>Consume a verification token, mark the account verified</td><td><span class="badge now">DONE</span></td></tr>
   <tr><td>POST</td><td><code>/api/auth/forgot-password</code></td><td>No</td><td>Issue a password reset token if the email exists (response is identical either way)</td><td><span class="badge now">DONE</span></td></tr>
   <tr><td>POST</td><td><code>/api/auth/reset-password</code></td><td>No</td><td>Consume a reset token, set a new password</td><td><span class="badge now">DONE</span></td></tr>
-  <tr><td>POST</td><td><code>/api/auth/google</code></td><td>No</td><td>Exchange a verified Google ID token for our app JWT</td><td><span class="badge later">PLANNED</span></td></tr>
+  <tr><td>POST</td><td><code>/api/auth/google</code></td><td>No</td><td>Exchange a verified Google ID token for our app JWT</td><td><span class="badge now">DONE</span></td></tr>
   <tr><td>GET</td><td><code>/api/users/me</code></td><td>Yes</td><td>Return the current user's profile (first protected endpoint to test the filter)</td><td><span class="badge later">PLANNED</span></td></tr>
 </table>
 
 <h2 id="deferred">12. Explicitly deferred (per Set G)</h2>
-<p>Email verification and password reset — originally listed here — are now built (see Flows E and F above). What's still intentionally deferred, consistent with principle 3.4 in the domain doc ("don't over-engineer the MVP"):</p>
+<p>Email verification, password reset, and Google sign-in — originally listed here — are now all built (see Flows C, E, and F above). What's still intentionally deferred, consistent with principle 3.4 in the domain doc ("don't over-engineer the MVP"):</p>
 <ul>
-  <li>Sign in with Google (<code>GoogleTokenVerifier</code> + <code>/api/auth/google</code>) — designed above (Flow C), not yet built</li>
   <li>Refresh tokens / silent session renewal</li>
   <li>Roles / permissions system beyond a single implicit user role</li>
   <li>Account deletion</li>

@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Frontend Implementation Plan — MyCompass Docs</title>
+<style>
+  :root {
+    --bg: #f7f7f8; --card: #ffffff; --text: #1c1c1e; --muted: #6b6b70;
+    --accent: #2f6fed; --border: #e4e4e7; --code-bg: #1c1c1e; --code-text: #e6e6e6;
+    --ok: #1a7f37; --warn: #9a6700; --danger: #b42318;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    background: var(--bg); color: var(--text); line-height: 1.6; padding: 40px 20px 80px;
+  }
+  .wrap { max-width: 880px; margin: 0 auto; }
+  a.back { display: inline-block; font-size: 13px; color: var(--accent); text-decoration: none; margin-bottom: 20px; }
+  h1 { font-size: 27px; margin-bottom: 4px; }
+  .subtitle { color: var(--muted); margin-bottom: 20px; font-size: 15px; }
+  h2 { font-size: 20px; margin-top: 44px; margin-bottom: 14px; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
+  h3 { font-size: 16px; margin-top: 26px; margin-bottom: 10px; color: var(--accent); }
+  p { margin: 10px 0; font-size: 15px; }
+  ul, ol { margin: 10px 0; padding-left: 22px; font-size: 15px; }
+  li { margin: 6px 0; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 18px 20px; margin: 16px 0; }
+  code { background: #eceef2; padding: 2px 6px; border-radius: 4px; font-size: 13.5px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  pre { background: var(--code-bg); color: var(--code-text); padding: 14px 16px; border-radius: 8px; overflow-x: auto; font-size: 13.5px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; line-height: 1.5; }
+  pre code { background: none; padding: 0; }
+  table { width: 100%; border-collapse: collapse; margin: 14px 0; font-size: 14px; }
+  th, td { border: 1px solid var(--border); padding: 8px 10px; text-align: left; vertical-align: top; }
+  th { background: #eceef2; }
+  .diagram {
+    background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 20px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13px;
+    white-space: pre; overflow-x: auto; line-height: 1.5;
+  }
+  .note { background: #fff8e6; border: 1px solid #f0dca0; border-radius: 8px; padding: 12px 16px; font-size: 14px; margin: 16px 0; }
+  .decision { background: #eef4ff; border: 1px solid #cddcf7; border-radius: 8px; padding: 12px 16px; font-size: 14px; margin: 16px 0; }
+  .decision strong { color: var(--accent); }
+  .action { background: #fdeceb; border: 1px solid #f3b8b1; border-radius: 8px; padding: 12px 16px; font-size: 14px; margin: 16px 0; }
+  .action strong { color: var(--danger); }
+  .badge { display: inline-block; font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 20px; margin-left: 6px; }
+  .badge.now { background: #dcfce7; color: var(--ok); }
+  .badge.later { background: #fef3c7; color: var(--warn); }
+  .badge.blocker { background: #fdeceb; color: var(--danger); }
+  .toc { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 18px 22px; }
+  .toc a { color: var(--accent); text-decoration: none; font-size: 14px; }
+  .toc li { margin: 4px 0; }
+  .tree { background: var(--code-bg); color: var(--code-text); padding: 14px 16px; border-radius: 8px; font-size: 13px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space: pre; overflow-x: auto; line-height: 1.5; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<a class="back" href="../index.html">&larr; Back to Docs</a>
+<h1>Frontend Implementation Plan</h1>
+<div class="subtitle">mycompass-ui — routing, state, pages, and flow diagrams for the React frontend, scoped to what the backend can actually support today.</div>
+<p>
+  <span class="badge now">READY TO BUILD</span> = backend support already exists.
+  <span class="badge later">BLOCKED</span> = backend support doesn't exist yet.
+  <span class="badge blocker">ACTION NEEDED</span> = a backend change required before frontend work can start.
+</p>
+
+<div class="toc">
+  <strong>Contents</strong>
+  <ol>
+    <li><a href="#context">Where this fits</a></li>
+    <li><a href="#prereq">Backend prerequisite — CORS</a></li>
+    <li><a href="#scope">Scope — what's buildable now vs blocked</a></li>
+    <li><a href="#stack">Tech stack recap</a></li>
+    <li><a href="#structure">Project structure</a></li>
+    <li><a href="#routing">Routing map</a></li>
+    <li><a href="#state">State &amp; data layer</a></li>
+    <li><a href="#pages">Page-by-page breakdown</a></li>
+    <li><a href="#flows">Process flows (diagrams)</a></li>
+    <li><a href="#errors">Error handling &amp; UX conventions</a></li>
+    <li><a href="#env">Environment configuration</a></li>
+    <li><a href="#order">Implementation order</a></li>
+    <li><a href="#deferred">Explicitly deferred</a></li>
+  </ol>
+</div>
+
+<h2 id="context">1. Where this fits</h2>
+<p>The backend already has a fully built and tested auth system (see <code>auth/jwt-google-signin.html</code> and the 15 passing tests in <code>AuthServiceTest</code>): register, login, email verification, and forgot/reset password, all returning a stateless app JWT. This plan is the frontend that consumes exactly those five endpoints — nothing more, nothing speculative. Task/Project/Category UI is intentionally out of scope here since those backend domains don't exist yet (per the domain doc's own staged approach).</p>
+
+<h2 id="prereq">2. Backend prerequisite — CORS <span class="badge blocker">ACTION NEEDED</span></h2>
+<div class="action">
+  <strong>This must be added to the backend before any frontend page can call it.</strong> I checked <code>SecurityConfig.java</code> directly — there is currently no CORS configuration at all. Spring Security blocks cross-origin requests by default, and the React dev server (<code>localhost:5173</code>) and the backend (<code>localhost:8080</code>) are different origins from a browser's point of view. Without this, every fetch from the frontend will fail in the browser console with a CORS error, even though the same request works fine from curl (curl doesn't enforce CORS — only browsers do, which is exactly why our backend testing so far never surfaced this gap).
+</div>
+<p>The fix is small — a <code>CorsConfigurationSource</code> bean allowing <code>http://localhost:5173</code>, wired into the existing <code>SecurityFilterChain</code> via <code>.cors(...)</code>. This is a backend change, tracked here so it isn't forgotten, and should be the very first implementation step once this plan is approved.</p>
+
+<h2 id="scope">3. Scope — what's buildable now vs blocked</h2>
+<table>
+  <tr><th>In scope now</th><th>Blocked (backend doesn't support it yet)</th></tr>
+  <tr><td>Register form <span class="badge now">READY</span></td><td>Task list / dashboard widgets <span class="badge later">BLOCKED</span> — no Task backend yet</td></tr>
+  <tr><td>Login form <span class="badge now">READY</span></td><td></td></tr>
+  <tr><td>Sign in with Google button <span class="badge now">READY</span> — <code>/api/auth/google</code> is now built and tested</td><td></td></tr>
+  <tr><td>Email verification landing page <span class="badge now">READY</span></td><td>User profile editing <span class="badge later">BLOCKED</span> — no <code>/api/users/me</code> yet</td></tr>
+  <tr><td>Forgot password form <span class="badge now">READY</span></td><td></td></tr>
+  <tr><td>Reset password form <span class="badge now">READY</span></td><td></td></tr>
+  <tr><td>Protected route + logout <span class="badge now">READY</span></td><td></td></tr>
+  <tr><td>Minimal placeholder dashboard (proves the JWT round-trip works) <span class="badge now">READY</span></td><td></td></tr>
+</table>
+
+<h2 id="stack">4. Tech stack recap</h2>
+<table>
+  <tr><th>Piece</th><th>Choice</th><th>Why</th></tr>
+  <tr><td>Build tool</td><td>Vite</td><td>Fast dev server, already scaffolded in <code>mycompass-ui</code></td></tr>
+  <tr><td>Framework</td><td>React + TypeScript</td><td>Already scaffolded</td></tr>
+  <tr><td>UI components</td><td>MUI</td><td>Ready-made forms, dialogs, alerts — avoids hand-building every input/button</td></tr>
+  <tr><td>Routing</td><td>React Router</td><td>Switch between Login/Register/Dashboard/etc. without full page reloads</td></tr>
+  <tr><td>Server state</td><td>TanStack Query</td><td>Handles loading/error states and caching for API calls without hand-rolled boilerplate</td></tr>
+  <tr><td>HTTP client</td><td>axios</td><td>Configured instance with an interceptor that auto-attaches the JWT</td></tr>
+  <tr><td>Auth state</td><td>React Context (<code>AuthContext</code>)</td><td>Holds the current user + token in memory only — never <code>localStorage</code>, avoids XSS token theft (per the auth doc's tradeoff)</td></tr>
+</table>
+
+<h2 id="structure">5. Project structure</h2>
+<div class="tree">mycompass-ui/src/
+├── api/
+│   ├── client.ts            axios instance + auth header interceptor
+│   └── auth.ts              register(), login(), verifyEmail(), forgotPassword(), resetPassword()
+├── auth/
+│   ├── AuthContext.tsx       holds { user, token }, login()/logout() actions
+│   └── ProtectedRoute.tsx    redirects to /login if no token in context
+├── pages/
+│   ├── LoginPage.tsx
+│   ├── RegisterPage.tsx
+│   ├── VerifyEmailPage.tsx
+│   ├── ForgotPasswordPage.tsx
+│   ├── ResetPasswordPage.tsx
+│   └── DashboardPage.tsx     placeholder — "Welcome, {name}" + logout button
+├── App.tsx                   route definitions
+└── main.tsx                  ThemeProvider, QueryClientProvider, AuthProvider, RouterProvider
+</div>
+
+<h2 id="routing">6. Routing map</h2>
+<table>
+  <tr><th>Path</th><th>Page</th><th>Protected?</th></tr>
+  <tr><td><code>/login</code></td><td>LoginPage</td><td>No</td></tr>
+  <tr><td><code>/register</code></td><td>RegisterPage</td><td>No</td></tr>
+  <tr><td><code>/verify-email</code></td><td>VerifyEmailPage (reads <code>?token=</code>)</td><td>No</td></tr>
+  <tr><td><code>/forgot-password</code></td><td>ForgotPasswordPage</td><td>No</td></tr>
+  <tr><td><code>/reset-password</code></td><td>ResetPasswordPage (reads <code>?token=</code>)</td><td>No</td></tr>
+  <tr><td><code>/</code></td><td>DashboardPage</td><td>Yes — wrapped in <code>ProtectedRoute</code></td></tr>
+</table>
+<div class="note">These paths deliberately match the links the backend already generates — e.g. <code>AuthService.issueEmailVerificationToken()</code> builds <code>http://localhost:5173/verify-email?token=...</code>. The frontend routes exist specifically to receive those links.</div>
+
+<h2 id="state">7. State &amp; data layer</h2>
+<h3>AuthContext</h3>
+<p>A React context holding <code>{ user, token }</code> in component state (memory only, lost on refresh — an accepted MVP tradeoff, same as documented in the auth plan). Exposes <code>login(authResponse)</code> (called after a successful login/register API response) and <code>logout()</code> (clears state, redirects to <code>/login</code>).</p>
+
+<h3>axios instance + interceptor</h3>
+<pre><code>// api/client.ts
+const client = axios.create({ baseURL: import.meta.env.VITE_API_BASE_URL });
+
+client.interceptors.request.use((config) => {
+  const token = getTokenFromAuthContext();
+  if (token) config.headers.Authorization = `Bearer ${token}`;
+  return config;
+});
+
+client.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error.response?.status === 401) logout(); // token expired/invalid → force re-login
+    return Promise.reject(error);
+  }
+);</code></pre>
+
+<h3>TanStack Query</h3>
+<p>Each API call (register, login, verify-email, etc.) is wrapped as a <code>useMutation</code> — gives you <code>isPending</code>/<code>isError</code>/<code>error</code> states for free, which map directly onto MUI's loading spinners and error alerts without writing that state machine by hand.</p>
+
+<h2 id="pages">8. Page-by-page breakdown</h2>
+<table>
+  <tr><th>Page</th><th>Calls</th><th>On success</th></tr>
+  <tr><td>LoginPage</td><td><code>POST /api/auth/login</code></td><td>Store token+user in AuthContext, navigate to <code>/</code></td></tr>
+  <tr><td>RegisterPage</td><td><code>POST /api/auth/register</code></td><td>Store token+user, show a "verify your email" banner (since <code>emailVerified</code> comes back <code>false</code>), navigate to <code>/</code></td></tr>
+  <tr><td>VerifyEmailPage</td><td><code>GET /api/auth/verify-email?token=</code> on mount</td><td>Show success message + link to <code>/login</code></td></tr>
+  <tr><td>ForgotPasswordPage</td><td><code>POST /api/auth/forgot-password</code></td><td>Show the same generic message the backend returns, regardless of whether the email existed</td></tr>
+  <tr><td>ResetPasswordPage</td><td><code>POST /api/auth/reset-password</code></td><td>Show success, navigate to <code>/login</code></td></tr>
+  <tr><td>DashboardPage</td><td>none yet — placeholder</td><td>Displays the logged-in user's name/email from AuthContext, has a logout button</td></tr>
+</table>
+
+<h2 id="flows">9. Process flows</h2>
+
+<h3>Flow A — Register → verify email → login</h3>
+<div class="diagram">
+User fills RegisterPage form (name, email, password)
+        │
+        ▼
+POST /api/auth/register
+        │
+   ┌────┴─────┐
+  409          200 OK { token, user, emailVerified: false }
+   │                │
+   ▼                ▼
+Show "email       AuthContext.login(response)
+already taken"     │
+error inline        ▼
+               Navigate to "/" (Dashboard)
+               Show banner: "Verify your email — check your inbox"
+                    │
+                    ▼
+   (separately) user opens the console-logged link:
+   http://localhost:5173/verify-email?token=xxxx
+                    │
+                    ▼
+        VerifyEmailPage calls GET /api/auth/verify-email?token=xxxx on mount
+                    │
+               ┌────┴────┐
+              200          400
+               │             │
+               ▼             ▼
+     "Email verified!"   "Invalid or expired link"
+     link to /login
+</div>
+
+<h3>Flow B — Login → protected route</h3>
+<div class="diagram">
+User submits LoginPage form
+        │
+        ▼
+POST /api/auth/login
+        │
+   ┌────┴─────┐
+  400          200 OK { token, user }
+   │                │
+   ▼                ▼
+Show "Invalid    AuthContext.login(response)
+email or              │
+password" inline      ▼
+                Navigate to "/" (Dashboard)
+                    │
+                    ▼
+        ProtectedRoute checks AuthContext.token
+                    │
+              ┌─────┴─────┐
+          present         missing
+             │                │
+             ▼                ▼
+      Render Dashboard   Redirect to /login
+</div>
+
+<h3>Flow C — Forgot password → reset password</h3>
+<div class="diagram">
+User submits email on ForgotPasswordPage
+        │
+        ▼
+POST /api/auth/forgot-password
+        │
+        ▼
+ALWAYS shows the same message:
+"If that email is registered, a reset link has been sent"
+        │
+        ▼
+   (separately) user opens the console-logged link:
+   http://localhost:5173/reset-password?token=xxxx
+        │
+        ▼
+ResetPasswordPage reads token from URL, user submits new password
+        │
+        ▼
+POST /api/auth/reset-password { token, newPassword }
+        │
+   ┌────┴─────┐
+  400          200 OK
+   │             │
+   ▼             ▼
+"Invalid or   "Password reset — please log in"
+expired link"  Navigate to /login
+</div>
+
+<h3>Flow D — Expired/invalid token during normal use</h3>
+<div class="diagram">
+User is on the Dashboard, JWT has expired (24h passed)
+        │
+        ▼
+Any API call fires, backend returns 401
+        │
+        ▼
+axios response interceptor catches the 401
+        │
+        ▼
+AuthContext.logout() — clears user+token from memory
+        │
+        ▼
+Redirect to /login
+   (no silent refresh yet — refresh tokens are deferred,
+    same as documented in the backend auth plan)
+</div>
+
+<h2 id="errors">10. Error handling &amp; UX conventions</h2>
+<ul>
+  <li>Every backend error response is <code>{ "message": "..." }</code> (from <code>AuthExceptionHandler</code>) — so every form can display <code>error.response.data.message</code> directly in an MUI <code>Alert</code>, with no per-endpoint special-casing needed.</li>
+  <li><strong>Forgot password never shows a different message for a real vs. fake email</strong> — the frontend must not "improve" this by trying to hint whether the email existed; that would undo the backend's anti-enumeration protection.</li>
+  <li>Form submission buttons disable + show a spinner while a <code>useMutation</code> is <code>isPending</code>, using MUI's <code>LoadingButton</code> pattern.</li>
+</ul>
+
+<h2 id="env">11. Environment configuration</h2>
+<p>A <code>.env</code> file at the root of <code>mycompass-ui</code>:</p>
+<pre><code>VITE_API_BASE_URL=http://localhost:8080</code></pre>
+<p>Read in code via <code>import.meta.env.VITE_API_BASE_URL</code> — keeps the backend URL out of hardcoded strings, so pointing at a different environment later is a one-line change.</p>
+
+<h2 id="order">12. Implementation order</h2>
+<ol>
+  <li><strong>Backend:</strong> add CORS configuration to <code>SecurityConfig</code> — nothing else works without this <span class="badge blocker">ACTION NEEDED</span></li>
+  <li><strong>External setup:</strong> create a real Google OAuth Client ID in Google Cloud Console and set it as <code>app.google.client-id</code> — required before the Google Sign-In button can be wired up, though it doesn't block building the other pages first <span class="badge blocker">ACTION NEEDED</span></li>
+  <li>Frontend: install <code>react-router-dom</code>, <code>@tanstack/react-query</code>, <code>axios</code>, MUI packages (already documented in the earlier setup guide)</li>
+  <li>Frontend: <code>api/client.ts</code> — axios instance + interceptors</li>
+  <li>Frontend: <code>AuthContext</code> + <code>ProtectedRoute</code></li>
+  <li>Frontend: routing skeleton in <code>App.tsx</code> for all six pages (placeholder content first)</li>
+  <li>Frontend: build <code>LoginPage</code> + <code>RegisterPage</code>, wire to real endpoints, test against the running backend</li>
+  <li>Frontend: build <code>VerifyEmailPage</code>, test with a real console-logged link</li>
+  <li>Frontend: build <code>ForgotPasswordPage</code> + <code>ResetPasswordPage</code>, test with a real console-logged link</li>
+  <li>Frontend: build the placeholder <code>DashboardPage</code> + logout, confirm <code>ProtectedRoute</code> redirect behavior with an expired/missing token</li>
+  <li>End-to-end pass: register → verify → login → dashboard → logout → forgot password → reset → login again</li>
+</ol>
+
+<h2 id="deferred">13. Explicitly deferred</h2>
+<ul>
+  <li>Task/Project/Category pages — no backend for these yet</li>
+  <li>Silent token refresh — no refresh tokens on the backend yet (tracked in <code>jwt-known-gaps.md</code>)</li>
+  <li>Real design polish/branding — placeholder MUI defaults are fine until the core flows are proven end-to-end</li>
+  <li>Frontend automated tests (Vitest/React Testing Library) — reasonable next step once these pages exist, not before</li>
+</ul>
+
+</div>
+</body>
+</html>
