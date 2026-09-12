@@ -1,0 +1,333 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Auth: JWT + Google Sign-In — MyCompass Docs</title>
+<style>
+  :root {
+    --bg: #f7f7f8; --card: #ffffff; --text: #1c1c1e; --muted: #6b6b70;
+    --accent: #2f6fed; --border: #e4e4e7; --code-bg: #1c1c1e; --code-text: #e6e6e6;
+    --ok: #1a7f37; --warn: #9a6700;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    background: var(--bg); color: var(--text); line-height: 1.6; padding: 40px 20px 80px;
+  }
+  .wrap { max-width: 860px; margin: 0 auto; }
+  a.back { display: inline-block; font-size: 13px; color: var(--accent); text-decoration: none; margin-bottom: 20px; }
+  h1 { font-size: 27px; margin-bottom: 4px; }
+  .subtitle { color: var(--muted); margin-bottom: 32px; font-size: 15px; }
+  h2 { font-size: 20px; margin-top: 44px; margin-bottom: 14px; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
+  h3 { font-size: 16px; margin-top: 26px; margin-bottom: 10px; color: var(--accent); }
+  p { margin: 10px 0; font-size: 15px; }
+  ul, ol { margin: 10px 0; padding-left: 22px; font-size: 15px; }
+  li { margin: 6px 0; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 18px 20px; margin: 16px 0; }
+  code { background: #eceef2; padding: 2px 6px; border-radius: 4px; font-size: 13.5px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  pre { background: var(--code-bg); color: var(--code-text); padding: 14px 16px; border-radius: 8px; overflow-x: auto; font-size: 13.5px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; line-height: 1.5; }
+  pre code { background: none; padding: 0; }
+  table { width: 100%; border-collapse: collapse; margin: 14px 0; font-size: 14px; }
+  th, td { border: 1px solid var(--border); padding: 8px 10px; text-align: left; vertical-align: top; }
+  th { background: #eceef2; }
+  .diagram {
+    background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 20px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13px;
+    white-space: pre; overflow-x: auto; line-height: 1.5;
+  }
+  .note { background: #fff8e6; border: 1px solid #f0dca0; border-radius: 8px; padding: 12px 16px; font-size: 14px; margin: 16px 0; }
+  .decision { background: #eef4ff; border: 1px solid #cddcf7; border-radius: 8px; padding: 12px 16px; font-size: 14px; margin: 16px 0; }
+  .decision strong { color: var(--accent); }
+  .badge { display: inline-block; font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 20px; margin-left: 6px; }
+  .badge.now { background: #dcfce7; color: var(--ok); }
+  .badge.later { background: #fef3c7; color: var(--warn); }
+  .toc { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 18px 22px; }
+  .toc a { color: var(--accent); text-decoration: none; font-size: 14px; }
+  .toc li { margin: 4px 0; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<a class="back" href="../index.html">&larr; Back to Docs</a>
+<h1>Authentication: JWT + Sign in with Google</h1>
+<div class="subtitle">Full implementation plan and process workflow for MyCompass's login system — backend and frontend, with flow diagrams.</div>
+
+<div class="toc">
+  <strong>Contents</strong>
+  <ol>
+    <li><a href="#context">Where this fits in the domain design</a></li>
+    <li><a href="#scope">Scope — what's in, what's deferred</a></li>
+    <li><a href="#model">Data model changes</a></li>
+    <li><a href="#architecture">High-level architecture</a></li>
+    <li><a href="#backend">Backend components to build</a></li>
+    <li><a href="#flows">Process flows (diagrams)</a></li>
+    <li><a href="#jwt">JWT structure</a></li>
+    <li><a href="#frontend">Frontend components to build</a></li>
+    <li><a href="#security">Security considerations</a></li>
+    <li><a href="#order">Implementation order</a></li>
+    <li><a href="#endpoints">API endpoint summary</a></li>
+    <li><a href="#deferred">Explicitly deferred</a></li>
+  </ol>
+</div>
+
+<h2 id="context">1. Where this fits in the domain design</h2>
+<p>This plan directly builds on decisions already locked in <code>LifeOS_Domain_Design_QA.md</code>:</p>
+
+<div class="decision"><strong>Q2 — Personal vs collaboration:</strong> Personal-first. The auth system only needs to support single-owner accounts right now — no organizations, teams, or shared logins yet.</div>
+<div class="decision"><strong>Q18 — Task ownership:</strong> Every <code>Task</code> has a <code>createdBy → User</code>. This means the <code>User</code> entity we're building here is the foundation every other domain entity will eventually reference. Getting the User model right now avoids a painful migration later.</div>
+<div class="decision"><strong>Set G — Authentication &amp; Users:</strong> Lists registration, login, password hashing, JWT/session approach, refresh tokens, email verification, password reset, roles as topics. This document answers the first four now and explicitly defers the rest (see §12).</div>
+<div class="decision"><strong>Set K philosophy:</strong> "Domain model first, API second, database third." So we design the <code>User</code> entity and auth flow conceptually before writing a single endpoint.</div>
+
+<h2 id="scope">2. Scope — what's in, what's deferred</h2>
+<table>
+  <tr><th>In scope now</th><th>Deferred (Set G, later)</th></tr>
+  <tr><td>Email + password registration/login</td><td>Email verification</td></tr>
+  <tr><td>Sign in with Google (OAuth ID token exchange)</td><td>Password reset flow</td></tr>
+  <tr><td>Stateless JWT issued by our backend</td><td>Refresh tokens / silent renewal</td></tr>
+  <tr><td>Password hashing (BCrypt)</td><td>Roles/permissions system</td></tr>
+  <tr><td>Protecting API routes with a JWT filter</td><td>Account deletion</td></tr>
+  <tr><td></td><td>Rate limiting / brute-force protection</td></tr>
+</table>
+
+<h2 id="model">3. Data model changes</h2>
+<p>A new <code>User</code> entity, designed to support <em>both</em> login methods from day one so we don't have to migrate later:</p>
+<pre><code>User
+├── id                UUID / Long, primary key
+├── email             unique, not null
+├── passwordHash      nullable   ← null for Google-only accounts
+├── name
+├── provider           enum: LOCAL, GOOGLE
+├── googleId           nullable, unique when present
+├── createdAt
+└── updatedAt</code></pre>
+<div class="note">
+  <strong>Why <code>passwordHash</code> is nullable:</strong> a user who only ever signs in with Google never sets a password, so it must be optional. <code>provider</code> tells us which login path is valid for that account, preventing someone from trying to password-login into a Google-only account.
+</div>
+
+<h2 id="architecture">4. High-level architecture</h2>
+<div class="diagram">
+┌──────────────┐        Bearer JWT         ┌───────────────────┐        JPA        ┌────────────────┐
+│   React UI   │ ────────────────────────▶ │   Spring Boot API │ ─────────────────▶│   PostgreSQL   │
+│ (mycompass-  │ ◀──────────────────────── │ (mycompass-       │ ◀─────────────────│   (Docker)     │
+│     ui)      │      JSON responses       │    backend)       │                    │                │
+└──────────────┘                           └───────────────────┘
+       │                                            │
+       │ Google ID token (from popup)               │ verifies token signature
+       ▼                                            ▼
+┌──────────────┐                           ┌───────────────────┐
+│   Google     │                           │  Google's public  │
+│  Identity    │ ────────────────────────▶ │  keys (JWKS)       │
+│  Services    │                           │  used to verify    │
+└──────────────┘                           └───────────────────┘
+</div>
+<p>Key idea: the frontend never talks to Google's servers for verification — it only gets a signed token from the Google popup and hands it to <em>our</em> backend. Our backend is the only thing that verifies it, using Google's published public keys.</p>
+
+<h2 id="backend">5. Backend components to build</h2>
+<table>
+  <tr><th>Component</th><th>Responsibility</th></tr>
+  <tr><td><code>User</code> (entity) + <code>UserRepository</code></td><td>Persistence for accounts</td></tr>
+  <tr><td><code>AuthProvider</code> (enum)</td><td><code>LOCAL</code> / <code>GOOGLE</code></td></tr>
+  <tr><td><code>PasswordEncoder</code> bean</td><td>BCrypt hashing, provided by Spring Security</td></tr>
+  <tr><td><code>JwtService</code></td><td>Generate, parse, and validate our own app JWTs (using <code>jjwt</code>, already in <code>pom.xml</code>)</td></tr>
+  <tr><td><code>GoogleTokenVerifier</code></td><td>Verifies a Google ID token's signature, audience, and expiry against Google's JWKS</td></tr>
+  <tr><td><code>AuthController</code></td><td>Exposes <code>/api/auth/register</code>, <code>/api/auth/login</code>, <code>/api/auth/google</code></td></tr>
+  <tr><td><code>JwtAuthenticationFilter</code></td><td>Runs on every request, reads the <code>Authorization</code> header, validates the JWT, populates Spring Security's context</td></tr>
+  <tr><td><code>SecurityConfig</code> (update)</td><td>Stateless session policy, permit <code>/api/auth/**</code> and Swagger paths, require auth everywhere else, register the JWT filter</td></tr>
+</table>
+
+<h2 id="flows">6. Process flows</h2>
+
+<h3>Flow A — Register with email/password</h3>
+<div class="diagram">
+User fills registration form (email, password, name)
+        │
+        ▼
+POST /api/auth/register
+        │
+        ▼
+AuthController → is email already taken?
+        │
+   ┌────┴────┐
+  yes         no
+   │           │
+   ▼           ▼
+409 Conflict   Hash password (BCrypt)
+               │
+               ▼
+               Save User(provider = LOCAL)
+               │
+               ▼
+               JwtService generates app JWT
+               │
+               ▼
+               Return { token, user }
+               │
+               ▼
+Frontend stores token in memory, redirects to dashboard
+</div>
+
+<h3>Flow B — Login with email/password</h3>
+<div class="diagram">
+User submits { email, password }
+        │
+        ▼
+POST /api/auth/login
+        │
+        ▼
+Load User by email
+        │
+   ┌────┴─────────────────┐
+  not found            found, provider = LOCAL
+   │                       │
+   ▼                       ▼
+401 Unauthorized     BCrypt.matches(password, passwordHash)?
+                           │
+                     ┌─────┴─────┐
+                    yes           no
+                     │             │
+                     ▼             ▼
+              Generate JWT    401 Unauthorized
+                     │
+                     ▼
+              Return { token, user }
+</div>
+
+<h3>Flow C — Sign in with Google</h3>
+<div class="diagram">
+User clicks "Sign in with Google" (React button)
+        │
+        ▼
+Google Identity Services popup — user authenticates directly with Google
+        │
+        ▼
+Google returns a SIGNED ID TOKEN to the frontend
+   (our app never sees the user's Google password)
+        │
+        ▼
+Frontend: POST /api/auth/google { idToken }
+        │
+        ▼
+Backend: GoogleTokenVerifier checks —
+   • signature is genuinely from Google
+   • audience matches OUR client ID
+   • token has not expired
+        │
+   ┌────┴─────┐
+  invalid      valid → extract email, name, googleId
+   │                │
+   ▼                ▼
+401           Does a User with this email already exist?
+                    │
+             ┌──────┴───────┐
+            yes              no
+             │                │
+             ▼                ▼
+      link googleId      create new User
+      if not already      (provider = GOOGLE)
+      linked
+             │                │
+             └───────┬────────┘
+                      ▼
+             JwtService generates OUR app JWT
+                      │
+                      ▼
+             Return { token, user }
+</div>
+
+<h3>Flow D — Any authenticated request afterwards</h3>
+<div class="diagram">
+Frontend makes an API call (e.g. GET /api/tasks)
+        │
+        ▼
+axios interceptor attaches:
+   Authorization: Bearer &lt;app JWT&gt;
+        │
+        ▼
+JwtAuthenticationFilter intercepts the request
+        │
+        ▼
+Parse token, validate signature + expiry
+        │
+   ┌────┴─────┐
+  invalid      valid
+   │            │
+   ▼            ▼
+401       Load user identity → set Spring SecurityContext
+                 │
+                 ▼
+          Request proceeds to the real controller (e.g. TaskController)
+</div>
+
+<h2 id="jwt">7. JWT structure</h2>
+<p>Our own app-issued token (not Google's) carries just enough to identify the user:</p>
+<pre><code>{
+  "sub": "&lt;userId&gt;",
+  "email": "user@example.com",
+  "iat": 1234567890,
+  "exp": 1234654290
+}</code></pre>
+<ul>
+  <li><strong>Signing algorithm:</strong> HS256, using <code>jjwt</code> (already added to <code>pom.xml</code>)</li>
+  <li><strong>Secret:</strong> stored in <code>application.properties</code> for now (local dev only) — must move to an environment variable before any real deployment</li>
+  <li><strong>Expiry:</strong> a single access token, e.g. 24h, for the MVP — no refresh token yet (see §12); when it expires, the user simply logs in again</li>
+</ul>
+
+<h2 id="frontend">8. Frontend components to build</h2>
+<table>
+  <tr><th>Component</th><th>Responsibility</th></tr>
+  <tr><td><code>AuthContext</code> (React context)</td><td>Holds the current user + JWT <strong>in memory only</strong> (React state) — never <code>localStorage</code>, to avoid XSS token theft</td></tr>
+  <tr><td>Configured <code>axios</code> instance</td><td>Interceptor that attaches <code>Authorization: Bearer &lt;token&gt;</code> to every request automatically</td></tr>
+  <tr><td><code>LoginPage</code></td><td>MUI form (email/password) + the Google Sign-In button (<code>@react-oauth/google</code>)</td></tr>
+  <tr><td><code>RegisterPage</code></td><td>MUI form for new local accounts</td></tr>
+  <tr><td><code>ProtectedRoute</code></td><td>Wraps routes that require login; redirects to <code>/login</code> if there's no valid token in context</td></tr>
+</table>
+<div class="note"><strong>MVP tradeoff:</strong> storing the token only in memory means a page refresh logs the user out (no persisted session). That's an accepted, intentional MVP limitation — solving it properly means adding refresh tokens (deferred, §12), not falling back to <code>localStorage</code>, which would reopen the XSS risk.</div>
+
+<h2 id="security">9. Security considerations</h2>
+<ul>
+  <li><strong>Password hashing:</strong> BCrypt via Spring Security's <code>PasswordEncoder</code> — never store or log plaintext passwords.</li>
+  <li><strong>Token storage:</strong> in-memory (React state) only, per the tradeoff above.</li>
+  <li><strong>CORS:</strong> already configured to allow <code>http://localhost:5173</code> (see the Docker/Postgres doc's sibling setup).</li>
+  <li><strong>Google token verification must happen server-side.</strong> Never trust a client-decoded JWT payload for authorization decisions — always re-verify signature and audience on the backend.</li>
+  <li><strong>HTTPS:</strong> not required locally, but mandatory before any real deployment — JWTs sent over plain HTTP can be intercepted.</li>
+</ul>
+
+<h2 id="order">10. Implementation order</h2>
+<ol>
+  <li>Backend: <code>User</code> entity + Flyway migration</li>
+  <li>Backend: <code>PasswordEncoder</code> bean + <code>JwtService</code></li>
+  <li>Backend: <code>AuthController</code> (register + login) + <code>JwtAuthenticationFilter</code> + updated <code>SecurityConfig</code></li>
+  <li>Verify via Swagger UI / curl — register, login, hit a protected endpoint with the token</li>
+  <li>Backend: <code>GoogleTokenVerifier</code> + <code>/api/auth/google</code> endpoint</li>
+  <li>Frontend: <code>AuthContext</code> + configured axios instance</li>
+  <li>Frontend: <code>LoginPage</code> + <code>RegisterPage</code> (MUI)</li>
+  <li>Frontend: wire up the Google Sign-In button</li>
+  <li>Frontend: <code>ProtectedRoute</code> + redirect logic</li>
+  <li>End-to-end test: register → login → access a protected route → sign out → sign in with Google</li>
+</ol>
+
+<h2 id="endpoints">11. API endpoint summary</h2>
+<table>
+  <tr><th>Method</th><th>Path</th><th>Auth required?</th><th>Purpose</th></tr>
+  <tr><td>POST</td><td><code>/api/auth/register</code></td><td>No</td><td>Create a local account</td></tr>
+  <tr><td>POST</td><td><code>/api/auth/login</code></td><td>No</td><td>Log in with email/password</td></tr>
+  <tr><td>POST</td><td><code>/api/auth/google</code></td><td>No</td><td>Exchange a verified Google ID token for our app JWT</td></tr>
+  <tr><td>GET</td><td><code>/api/users/me</code></td><td>Yes</td><td>Return the current user's profile (first protected endpoint to test the filter)</td></tr>
+</table>
+
+<h2 id="deferred">12. Explicitly deferred (per Set G)</h2>
+<p>Consistent with principle 3.4 in the domain doc ("don't over-engineer the MVP"), these are acknowledged but intentionally not built yet:</p>
+<ul>
+  <li>Refresh tokens / silent session renewal</li>
+  <li>Email verification on registration</li>
+  <li>Password reset ("forgot password") flow</li>
+  <li>Roles / permissions system beyond a single implicit user role</li>
+  <li>Account deletion</li>
+  <li>Rate limiting or brute-force protection on the login endpoint</li>
+</ul>
+<p>Each of these can be added later without reworking the core <code>User</code> model or JWT approach designed here — they're additive, not architectural changes.</p>
+
+</div>
+</body>
+</html>

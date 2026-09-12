@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Docker & PostgreSQL — MyCompass Docs</title>
+<style>
+  :root {
+    --bg: #f7f7f8;
+    --card: #ffffff;
+    --text: #1c1c1e;
+    --muted: #6b6b70;
+    --accent: #2f6fed;
+    --border: #e4e4e7;
+    --code-bg: #1c1c1e;
+    --code-text: #e6e6e6;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+    padding: 40px 20px 80px;
+  }
+  .wrap { max-width: 760px; margin: 0 auto; }
+  a.back {
+    display: inline-block;
+    font-size: 13px;
+    color: var(--accent);
+    text-decoration: none;
+    margin-bottom: 20px;
+  }
+  h1 { font-size: 26px; margin-bottom: 4px; }
+  .subtitle { color: var(--muted); margin-bottom: 32px; font-size: 15px; }
+  h2 {
+    font-size: 19px;
+    margin-top: 40px;
+    margin-bottom: 12px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border);
+  }
+  p { margin: 10px 0; font-size: 15px; }
+  ul, ol { margin: 10px 0; padding-left: 22px; font-size: 15px; }
+  li { margin: 6px 0; }
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 18px 20px;
+    margin: 16px 0;
+  }
+  code {
+    background: #eceef2;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 13.5px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  pre {
+    background: var(--code-bg);
+    color: var(--code-text);
+    padding: 14px 16px;
+    border-radius: 8px;
+    overflow-x: auto;
+    font-size: 13.5px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    line-height: 1.5;
+  }
+  pre code { background: none; padding: 0; }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 14px 0;
+    font-size: 14px;
+  }
+  th, td {
+    border: 1px solid var(--border);
+    padding: 8px 10px;
+    text-align: left;
+  }
+  th { background: #eceef2; }
+  .diagram {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 20px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 13.5px;
+    white-space: pre;
+    overflow-x: auto;
+  }
+  .note {
+    background: #fff8e6;
+    border: 1px solid #f0dca0;
+    border-radius: 8px;
+    padding: 12px 16px;
+    font-size: 14px;
+    margin: 16px 0;
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <a class="back" href="../index.html">&larr; Back to Docs</a>
+  <h1>Docker &amp; PostgreSQL in MyCompass</h1>
+  <div class="subtitle">What Docker is, how our database runs inside it, how to check it's alive, how to view it visually, and how Spring Boot talks to it.</div>
+
+  <h2>1. What is Docker, in simple words?</h2>
+  <p>
+    Docker lets you run a program (like PostgreSQL) inside an isolated, self-contained "box" called a
+    <strong>container</strong> — without installing that program directly on your Mac. The container
+    includes everything the program needs (the exact OS libraries, the exact PostgreSQL version) already
+    packaged up, so it behaves identically on any machine that runs Docker.
+  </p>
+  <p>Think of it like a shipping container: whatever is packed inside it works the same whether it's on a truck, a ship, or a train — the outside world doesn't need to know or care what's inside.</p>
+
+  <h2>2. Why we run Postgres in Docker instead of installing it directly</h2>
+  <ul>
+    <li><strong>No messy local install</strong> — no fiddling with Homebrew services, version conflicts, or leftover config files on your actual Mac.</li>
+    <li><strong>Fully disposable</strong> — if the database gets into a bad state, we just delete the container and start a clean one in seconds.</li>
+    <li><strong>Matches real-world practice</strong> — production systems almost always run databases in containers, so this is realistic practice, not a shortcut.</li>
+    <li><strong>One shared definition</strong> — the exact same <code>docker-compose.yml</code> file guarantees anyone running this project gets an identical database setup.</li>
+  </ul>
+
+  <h2>3. How it's set up in this project</h2>
+  <p>The file <code>mycompass-backend/docker-compose.yml</code> describes the database container:</p>
+  <pre><code>services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: mycompass
+      POSTGRES_USER: mycompass
+      POSTGRES_PASSWORD: mycompass
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+volumes:
+  pgdata:</code></pre>
+
+  <table>
+    <tr><th>Line</th><th>Meaning</th></tr>
+    <tr><td><code>image: postgres:16</code></td><td>Use the official PostgreSQL version 16 image from Docker Hub.</td></tr>
+    <tr><td><code>POSTGRES_DB / USER / PASSWORD</code></td><td>Creates a database named <code>mycompass</code> with a login of the same name/password, the first time the container starts.</td></tr>
+    <tr><td><code>ports: "5432:5432"</code></td><td>Maps the container's internal port 5432 to port 5432 on your Mac — this is the part that lets your app "see" the database as if it were local.</td></tr>
+    <tr><td><code>volumes: pgdata:...</code></td><td>Stores the actual database files outside the container, in a Docker-managed volume, so your data survives even if the container is removed and recreated.</td></tr>
+  </table>
+
+  <h2>4. Starting, stopping, and verifying the instance</h2>
+  <p>Run these from inside the <code>mycompass-backend</code> folder:</p>
+  <pre><code># Start the database in the background
+docker compose up -d
+
+# Check it's listed as "Up"
+docker compose ps
+
+# Check Postgres itself is ready to accept connections
+docker exec mycompass-backend-postgres-1 pg_isready -U mycompass
+
+# View live logs (useful if something looks wrong)
+docker compose logs -f postgres
+
+# Stop the container (data is kept, since it's in the volume)
+docker compose down
+
+# Stop AND delete all data (careful — full reset)
+docker compose down -v</code></pre>
+
+  <div class="note">
+    <strong>Note:</strong> Docker Desktop (the app) must be running before any <code>docker</code> command works.
+    If a command says it can't connect to the daemon, open the Docker Desktop app first and wait for it to fully start.
+  </div>
+
+  <h2>5. Viewing the database in a UI</h2>
+  <p>
+    Running SQL by hand in a terminal works, but for actually looking at tables and rows, a GUI client is much easier.
+    For Mac, the simplest options are:
+  </p>
+  <ul>
+    <li><strong>TablePlus</strong> (recommended) — clean, native Mac app, free tier is enough for this project.</li>
+    <li><strong>DBeaver</strong> — free, cross-platform, more features than you'll need but works well.</li>
+    <li><strong>pgAdmin</strong> — the official Postgres GUI, browser-based, a bit heavier.</li>
+  </ul>
+  <p>Whichever you pick, create a new PostgreSQL connection with these details (same as in <code>application.properties</code>):</p>
+  <table>
+    <tr><th>Field</th><th>Value</th></tr>
+    <tr><td>Host</td><td><code>localhost</code></td></tr>
+    <tr><td>Port</td><td><code>5432</code></td></tr>
+    <tr><td>Database</td><td><code>mycompass</code></td></tr>
+    <tr><td>User</td><td><code>mycompass</code></td></tr>
+    <tr><td>Password</td><td><code>mycompass</code></td></tr>
+  </table>
+  <p>Once connected, you'll be able to browse tables, run queries, and see the rows your Spring Boot app creates in real time.</p>
+
+  <h2>6. How Spring Boot actually connects to the Docker-based Postgres</h2>
+  <p>
+    This is the part that confuses people at first: the app isn't "talking to Docker" directly — it just connects to
+    <code>localhost:5432</code> exactly like it would for any normal, non-containerized Postgres install. The Docker
+    port mapping from step 3 is what makes that possible.
+  </p>
+
+  <div class="diagram">Spring Boot app (running directly on your Mac)
+        │
+        │  JDBC connection to localhost:5432
+        ▼
+Your Mac's port 5432  ──────────────▶  Docker maps this to the container
+        │
+        ▼
+Postgres process running INSIDE the container
+        │
+        ▼
+Data files stored in the "pgdata" Docker volume
+</div>
+
+  <p>The connection details are in <code>src/main/resources/application.properties</code>:</p>
+  <pre><code>spring.datasource.url=jdbc:postgresql://localhost:5432/mycompass
+spring.datasource.username=mycompass
+spring.datasource.password=mycompass</code></pre>
+
+  <p>
+    Spring Boot has no special "Docker awareness" — as far as it's concerned, it's just a normal PostgreSQL server sitting
+    at that host and port. Docker's job ends at exposing port 5432 on your machine; everything from there on is a completely
+    ordinary JDBC connection, same as it would be for any Postgres install.
+  </p>
+
+  <div class="note">
+    <strong>Order matters:</strong> the Postgres container must already be running (<code>docker compose up -d</code>)
+    before you start the Spring Boot app — otherwise the connection attempt fails immediately since there's nothing
+    listening on port 5432 yet.
+  </div>
+
+</div>
+</body>
+</html>
