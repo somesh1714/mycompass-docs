@@ -52,6 +52,10 @@
 <a class="back" href="../index.html">&larr; Back to Docs</a>
 <h1>Authentication: JWT + Sign in with Google</h1>
 <div class="subtitle">Full implementation plan and process workflow for MyCompass's login system — backend and frontend, with flow diagrams.</div>
+<p>
+  <span class="badge now">IMPLEMENTED</span> = built and verified end-to-end against the running backend.
+  <span class="badge later">PLANNED</span> = designed below, not yet built.
+</p>
 
 <div class="toc">
   <strong>Contents</strong>
@@ -60,8 +64,8 @@
     <li><a href="#scope">Scope — what's in, what's deferred</a></li>
     <li><a href="#model">Data model changes</a></li>
     <li><a href="#architecture">High-level architecture</a></li>
-    <li><a href="#backend">Backend components to build</a></li>
-    <li><a href="#flows">Process flows (diagrams)</a></li>
+    <li><a href="#backend">Backend components</a></li>
+    <li><a href="#flows">Process flows (diagrams) — register, login, Google, authenticated requests, email verification, password reset</a></li>
     <li><a href="#jwt">JWT structure</a></li>
     <li><a href="#frontend">Frontend components to build</a></li>
     <li><a href="#security">Security considerations</a></li>
@@ -82,27 +86,41 @@
 <h2 id="scope">2. Scope — what's in, what's deferred</h2>
 <table>
   <tr><th>In scope now</th><th>Deferred (Set G, later)</th></tr>
-  <tr><td>Email + password registration/login</td><td>Email verification</td></tr>
-  <tr><td>Sign in with Google (OAuth ID token exchange)</td><td>Password reset flow</td></tr>
-  <tr><td>Stateless JWT issued by our backend</td><td>Refresh tokens / silent renewal</td></tr>
-  <tr><td>Password hashing (BCrypt)</td><td>Roles/permissions system</td></tr>
-  <tr><td>Protecting API routes with a JWT filter</td><td>Account deletion</td></tr>
-  <tr><td></td><td>Rate limiting / brute-force protection</td></tr>
+  <tr><td>Email + password registration/login <span class="badge now">DONE</span></td><td>Sign in with Google (OAuth ID token exchange) <span class="badge later">PLANNED</span></td></tr>
+  <tr><td>Email verification on registration <span class="badge now">DONE</span></td><td>Refresh tokens / silent renewal</td></tr>
+  <tr><td>Password reset ("forgot password") flow <span class="badge now">DONE</span></td><td>Roles/permissions system</td></tr>
+  <tr><td>Stateless JWT issued by our backend <span class="badge now">DONE</span></td><td>Account deletion</td></tr>
+  <tr><td>Password hashing (BCrypt) <span class="badge now">DONE</span></td><td>Rate limiting / brute-force protection</td></tr>
+  <tr><td>Protecting API routes with a JWT filter <span class="badge now">DONE</span></td><td></td></tr>
 </table>
 
-<h2 id="model">3. Data model changes</h2>
-<p>A new <code>User</code> entity, designed to support <em>both</em> login methods from day one so we don't have to migrate later:</p>
+<h2 id="model">3. Data model changes <span class="badge now">IMPLEMENTED</span></h2>
+<p>The <code>User</code> entity, designed to support <em>both</em> login methods from day one so we don't have to migrate later:</p>
 <pre><code>User
-├── id                UUID / Long, primary key
+├── id                UUID, primary key
 ├── email             unique, not null
 ├── passwordHash      nullable   ← null for Google-only accounts
 ├── name
 ├── provider           enum: LOCAL, GOOGLE
 ├── googleId           nullable, unique when present
+├── emailVerified      boolean, default false
 ├── createdAt
 └── updatedAt</code></pre>
 <div class="note">
   <strong>Why <code>passwordHash</code> is nullable:</strong> a user who only ever signs in with Google never sets a password, so it must be optional. <code>provider</code> tells us which login path is valid for that account, preventing someone from trying to password-login into a Google-only account.
+</div>
+
+<p>A second entity, <code>VerificationToken</code>, backs <em>both</em> email verification and password reset with one shared table instead of duplicating near-identical schema for each:</p>
+<pre><code>VerificationToken
+├── id            UUID, primary key
+├── token         unique random string (sent in the email link)
+├── user          → User (many-to-one)
+├── type          enum: EMAIL_VERIFICATION, PASSWORD_RESET
+├── expiresAt     24h for verification, 1h for password reset
+├── usedAt        nullable ← set once the token is consumed, makes it single-use
+└── createdAt</code></pre>
+<div class="note">
+  <strong>Why one shared table instead of two:</strong> both features need the exact same shape — a random token tied to a user, with an expiry and single-use semantics. The <code>type</code> column is the only thing that differs, so one table (and one <code>isValid()</code> check: <code>usedAt == null &amp;&amp; expiresAt.isAfter(now)</code>) covers both.
 </div>
 
 <h2 id="architecture">4. High-level architecture</h2>
@@ -123,22 +141,25 @@
 </div>
 <p>Key idea: the frontend never talks to Google's servers for verification — it only gets a signed token from the Google popup and hands it to <em>our</em> backend. Our backend is the only thing that verifies it, using Google's published public keys.</p>
 
-<h2 id="backend">5. Backend components to build</h2>
+<h2 id="backend">5. Backend components</h2>
 <table>
-  <tr><th>Component</th><th>Responsibility</th></tr>
-  <tr><td><code>User</code> (entity) + <code>UserRepository</code></td><td>Persistence for accounts</td></tr>
-  <tr><td><code>AuthProvider</code> (enum)</td><td><code>LOCAL</code> / <code>GOOGLE</code></td></tr>
-  <tr><td><code>PasswordEncoder</code> bean</td><td>BCrypt hashing, provided by Spring Security</td></tr>
-  <tr><td><code>JwtService</code></td><td>Generate, parse, and validate our own app JWTs (using <code>jjwt</code>, already in <code>pom.xml</code>)</td></tr>
-  <tr><td><code>GoogleTokenVerifier</code></td><td>Verifies a Google ID token's signature, audience, and expiry against Google's JWKS</td></tr>
-  <tr><td><code>AuthController</code></td><td>Exposes <code>/api/auth/register</code>, <code>/api/auth/login</code>, <code>/api/auth/google</code></td></tr>
-  <tr><td><code>JwtAuthenticationFilter</code></td><td>Runs on every request, reads the <code>Authorization</code> header, validates the JWT, populates Spring Security's context</td></tr>
-  <tr><td><code>SecurityConfig</code> (update)</td><td>Stateless session policy, permit <code>/api/auth/**</code> and Swagger paths, require auth everywhere else, register the JWT filter</td></tr>
+  <tr><th>Component</th><th>Responsibility</th><th>Status</th></tr>
+  <tr><td><code>User</code> (entity) + <code>UserRepository</code></td><td>Persistence for accounts</td><td><span class="badge now">DONE</span></td></tr>
+  <tr><td><code>AuthProvider</code> (enum)</td><td><code>LOCAL</code> / <code>GOOGLE</code></td><td><span class="badge now">DONE</span></td></tr>
+  <tr><td><code>VerificationToken</code> (entity) + <code>VerificationTokenRepository</code></td><td>Shared single-use token backing email verification and password reset</td><td><span class="badge now">DONE</span></td></tr>
+  <tr><td><code>EmailService</code> / <code>ConsoleEmailService</code></td><td>Sends verification/reset links — logs to the console for now since no SMTP provider is wired up yet; swappable for a real sender later</td><td><span class="badge now">DONE</span></td></tr>
+  <tr><td><code>PasswordEncoder</code> bean</td><td>BCrypt hashing, provided by Spring Security</td><td><span class="badge now">DONE</span></td></tr>
+  <tr><td><code>JwtService</code></td><td>Generate, parse, and validate our own app JWTs (using <code>jjwt</code>)</td><td><span class="badge now">DONE</span></td></tr>
+  <tr><td><code>AuthService</code></td><td>Business logic for register, login, verify-email, forgot-password, reset-password</td><td><span class="badge now">DONE</span></td></tr>
+  <tr><td><code>AuthController</code> + <code>AuthExceptionHandler</code></td><td>Exposes <code>/api/auth/*</code> endpoints; maps validation failures to clean 400/409 responses</td><td><span class="badge now">DONE</span></td></tr>
+  <tr><td><code>JwtAuthenticationFilter</code></td><td>Runs on every request, reads the <code>Authorization</code> header, validates the JWT, populates Spring Security's context</td><td><span class="badge now">DONE</span></td></tr>
+  <tr><td><code>SecurityConfig</code></td><td>Stateless session policy, CSRF disabled (stateless JWT API), permit <code>/api/auth/**</code> and Swagger paths, require auth everywhere else, register the JWT filter</td><td><span class="badge now">DONE</span></td></tr>
+  <tr><td><code>GoogleTokenVerifier</code></td><td>Verifies a Google ID token's signature, audience, and expiry against Google's JWKS; feeds <code>/api/auth/google</code></td><td><span class="badge later">PLANNED</span></td></tr>
 </table>
 
 <h2 id="flows">6. Process flows</h2>
 
-<h3>Flow A — Register with email/password</h3>
+<h3>Flow A — Register with email/password <span class="badge now">IMPLEMENTED</span></h3>
 <div class="diagram">
 User fills registration form (email, password, name)
         │
@@ -155,19 +176,26 @@ AuthController → is email already taken?
 409 Conflict   Hash password (BCrypt)
                │
                ▼
-               Save User(provider = LOCAL)
+               Save User(provider = LOCAL, emailVerified = false)
+               │
+               ▼
+               Create VerificationToken(type = EMAIL_VERIFICATION, expires in 24h)
+               │
+               ▼
+               EmailService "sends" the verification link (console-logged for now)
                │
                ▼
                JwtService generates app JWT
                │
                ▼
-               Return { token, user }
+               Return { token, user, emailVerified: false }
                │
                ▼
 Frontend stores token in memory, redirects to dashboard
+   (can show a "verify your email" banner since emailVerified is false)
 </div>
 
-<h3>Flow B — Login with email/password</h3>
+<h3>Flow B — Login with email/password <span class="badge now">IMPLEMENTED</span></h3>
 <div class="diagram">
 User submits { email, password }
         │
@@ -193,7 +221,7 @@ Load User by email
               Return { token, user }
 </div>
 
-<h3>Flow C — Sign in with Google</h3>
+<h3>Flow C — Sign in with Google <span class="badge later">PLANNED — not yet built</span></h3>
 <div class="diagram">
 User clicks "Sign in with Google" (React button)
         │
@@ -235,7 +263,7 @@ Backend: GoogleTokenVerifier checks —
              Return { token, user }
 </div>
 
-<h3>Flow D — Any authenticated request afterwards</h3>
+<h3>Flow D — Any authenticated request afterwards <span class="badge now">IMPLEMENTED</span></h3>
 <div class="diagram">
 Frontend makes an API call (e.g. GET /api/tasks)
         │
@@ -257,6 +285,85 @@ Parse token, validate signature + expiry
                  │
                  ▼
           Request proceeds to the real controller (e.g. TaskController)
+</div>
+<p><strong>Verified live:</strong> a request to a non-auth path with no token returns <code>403</code>; Swagger's own paths stay open without one.</p>
+
+<h3>Flow E — Email verification <span class="badge now">IMPLEMENTED</span></h3>
+<div class="diagram">
+User clicks the verification link from their email
+   (…/verify-email?token=xxxx)
+        │
+        ▼
+Frontend calls GET /api/auth/verify-email?token=xxxx
+        │
+        ▼
+Look up VerificationToken by (token, type = EMAIL_VERIFICATION)
+        │
+   ┌────┴──────────────────────┐
+  not found / expired / used     found and valid
+   │                                 │
+   ▼                                 ▼
+400 Bad Request              user.emailVerified = true
+                              token.usedAt = now  ← makes it single-use
+                                 │
+                                 ▼
+                          Return { message: "Email verified successfully" }
+</div>
+<div class="note"><strong>Verified live:</strong> registering issues a real 24h token, console-logs the link, and hitting it flips <code>emailVerified</code> from <code>false</code> to <code>true</code> on the very next login response.</div>
+
+<h3>Flow F — Forgot password → reset password <span class="badge now">IMPLEMENTED</span></h3>
+<div class="diagram">
+User submits { email } on a "Forgot password?" form
+        │
+        ▼
+POST /api/auth/forgot-password
+        │
+        ▼
+Look up User by email, filter to provider = LOCAL
+        │
+   ┌────┴─────────────────────────┐
+  not found / Google account        found
+   │                                   │
+   ▼                                   ▼
+(do nothing)                    Create VerificationToken(type = PASSWORD_RESET, expires in 1h)
+   │                                   │
+   │                                   ▼
+   │                            EmailService "sends" the reset link
+   │                                   │
+   └─────────────┬─────────────────────┘
+                 ▼
+   Return the SAME message either way:
+   "If that email is registered, a password reset link has been sent"
+   (never reveals whether the email exists — prevents user enumeration)
+
+
+──────────────────────────────────────────────────────────────
+
+User clicks the reset link, submits { token, newPassword }
+        │
+        ▼
+POST /api/auth/reset-password
+        │
+        ▼
+Look up VerificationToken by (token, type = PASSWORD_RESET)
+        │
+   ┌────┴──────────────────────┐
+  not found / expired / used     found and valid
+   │                                 │
+   ▼                                 ▼
+400 Bad Request              user.passwordHash = BCrypt(newPassword)
+                              token.usedAt = now  ← single-use, can't be replayed
+                                 │
+                                 ▼
+                          Return { message: "Password reset successfully" }
+</div>
+<div class="note">
+  <strong>Verified live, including the edge cases that matter for security:</strong>
+  <ul>
+    <li>Requesting a reset for a real email and a made-up email return byte-for-byte identical responses.</li>
+    <li>After reset, the old password is rejected (400) and the new one logs in successfully.</li>
+    <li>Replaying the same reset token a second time is rejected (400) — confirmed the token is genuinely single-use.</li>
+  </ul>
 </div>
 
 <h2 id="jwt">7. JWT structure</h2>
@@ -309,24 +416,27 @@ Parse token, validate signature + expiry
 
 <h2 id="endpoints">11. API endpoint summary</h2>
 <table>
-  <tr><th>Method</th><th>Path</th><th>Auth required?</th><th>Purpose</th></tr>
-  <tr><td>POST</td><td><code>/api/auth/register</code></td><td>No</td><td>Create a local account</td></tr>
-  <tr><td>POST</td><td><code>/api/auth/login</code></td><td>No</td><td>Log in with email/password</td></tr>
-  <tr><td>POST</td><td><code>/api/auth/google</code></td><td>No</td><td>Exchange a verified Google ID token for our app JWT</td></tr>
-  <tr><td>GET</td><td><code>/api/users/me</code></td><td>Yes</td><td>Return the current user's profile (first protected endpoint to test the filter)</td></tr>
+  <tr><th>Method</th><th>Path</th><th>Auth required?</th><th>Purpose</th><th>Status</th></tr>
+  <tr><td>POST</td><td><code>/api/auth/register</code></td><td>No</td><td>Create a local account, triggers an email verification link</td><td><span class="badge now">DONE</span></td></tr>
+  <tr><td>POST</td><td><code>/api/auth/login</code></td><td>No</td><td>Log in with email/password</td><td><span class="badge now">DONE</span></td></tr>
+  <tr><td>GET</td><td><code>/api/auth/verify-email?token=</code></td><td>No</td><td>Consume a verification token, mark the account verified</td><td><span class="badge now">DONE</span></td></tr>
+  <tr><td>POST</td><td><code>/api/auth/forgot-password</code></td><td>No</td><td>Issue a password reset token if the email exists (response is identical either way)</td><td><span class="badge now">DONE</span></td></tr>
+  <tr><td>POST</td><td><code>/api/auth/reset-password</code></td><td>No</td><td>Consume a reset token, set a new password</td><td><span class="badge now">DONE</span></td></tr>
+  <tr><td>POST</td><td><code>/api/auth/google</code></td><td>No</td><td>Exchange a verified Google ID token for our app JWT</td><td><span class="badge later">PLANNED</span></td></tr>
+  <tr><td>GET</td><td><code>/api/users/me</code></td><td>Yes</td><td>Return the current user's profile (first protected endpoint to test the filter)</td><td><span class="badge later">PLANNED</span></td></tr>
 </table>
 
 <h2 id="deferred">12. Explicitly deferred (per Set G)</h2>
-<p>Consistent with principle 3.4 in the domain doc ("don't over-engineer the MVP"), these are acknowledged but intentionally not built yet:</p>
+<p>Email verification and password reset — originally listed here — are now built (see Flows E and F above). What's still intentionally deferred, consistent with principle 3.4 in the domain doc ("don't over-engineer the MVP"):</p>
 <ul>
+  <li>Sign in with Google (<code>GoogleTokenVerifier</code> + <code>/api/auth/google</code>) — designed above (Flow C), not yet built</li>
   <li>Refresh tokens / silent session renewal</li>
-  <li>Email verification on registration</li>
-  <li>Password reset ("forgot password") flow</li>
   <li>Roles / permissions system beyond a single implicit user role</li>
   <li>Account deletion</li>
-  <li>Rate limiting or brute-force protection on the login endpoint</li>
+  <li>Rate limiting or brute-force protection on the login/forgot-password endpoints</li>
+  <li>Real email delivery — currently logs to the console via <code>ConsoleEmailService</code> instead of actually sending mail; swapping in a real <code>EmailService</code> implementation (e.g. JavaMailSender + a provider) won't require touching <code>AuthService</code></li>
 </ul>
-<p>Each of these can be added later without reworking the core <code>User</code> model or JWT approach designed here — they're additive, not architectural changes.</p>
+<p>Each of these can be added later without reworking the core <code>User</code>/<code>VerificationToken</code> model or JWT approach built here — they're additive, not architectural changes.</p>
 
 </div>
 </body>
